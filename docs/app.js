@@ -20,6 +20,11 @@ let state = read(STATE_KEY) || { v: 1, name: "Fay", shows: {}, hidden: [] };
 let cache = read(CACHE_KEY) || {}; // id → { at, sum, eps: [[id, season, number, name, airstamp]] }
 state.shows ||= {};
 state.hidden ||= [];
+for (const t of Object.values(state.shows))
+  if (t.loved) {
+    t.feel = "love";
+    delete t.loved;
+  }
 
 let cacheTimer;
 function save() {
@@ -366,13 +371,13 @@ function taste() {
     const P = { genre: {}, type: {}, lang: {}, chan: {}, total: 0, anchors: [] };
     const W = { want: 0.6, watching: 1.2, watched: 1 };
     for (const t of Object.values(state.shows)) {
-      const w = W[t.status] * (t.loved ? 2.5 : 1);
+      const w = W[t.status] * ({ love: 2.5, ok: 0.35, no: 0 }[t.feel] ?? 1);
       P.total += w;
       for (const g of t.info.g) P.genre[g] = (P.genre[g] || 0) + w;
       P.type[t.info.t] = (P.type[t.info.t] || 0) + w;
       P.lang[t.info.l] = (P.lang[t.info.l] || 0) + w;
       if (t.info.c) P.chan[t.info.c] = (P.chan[t.info.c] || 0) + w;
-      if (t.info.g.length) P.anchors.push({ info: t.info, w, added: t.added, loved: !!t.loved });
+      if (t.info.g.length && t.feel !== "ok" && t.feel !== "no") P.anchors.push({ info: t.info, w, added: t.added, loved: t.feel === "love" });
     }
     for (const k of ["genre", "type", "lang", "chan"]) for (const g in P[k]) P[k][g] /= P.total || 1;
     P.norm = Math.sqrt(Object.entries(P.genre).reduce((a, [g, v]) => a + (v * (idf[g] || 1)) ** 2, 0)) || 1;
@@ -534,7 +539,7 @@ function tile(info, { meta = "", badge = "", quick = "" } = {}) {
     (tracked
       ? ""
       : `<button class="quick" data-act="add" data-id="${info.i}" aria-label="Add ${esc(info.n)}">${IC.plus}</button>`);
-  const heart = tracked?.loved ? `<span class="heart-dot">${IC.heart}</span>` : "";
+  const heart = tracked?.feel === "love" ? `<span class="heart-dot">${IC.heart}</span>` : "";
   return `<article class="tile" data-act="open" data-id="${info.i}" tabindex="0" role="button" aria-label="${esc(info.n)}">
     <div class="tile-art">${poster(info)}${badge}${heart}${q}</div>
     <h3>${esc(info.n)}</h3>${meta ? `<p>${meta}</p>` : ""}</article>`;
@@ -583,7 +588,7 @@ function datedRow(x) {
     <div class="leaf t-lilac"><small>${monthStr(x.at)}</small><b>${new Date(x.at).getDate()}</b></div>
     ${poster(x.info)}
     <div class="row-main"><h3>${esc(x.info.n)}</h3><p class="sub">${x.label}</p></div>
-    <span class="when">${rel(x.at) || new Date(x.at).toLocaleDateString(undefined, { weekday: "short" })}</span>
+    <span class="when">${rel(x.at) || (new Date(x.at).getFullYear() !== new Date().getFullYear() ? new Date(x.at).getFullYear() : new Date(x.at).toLocaleDateString(undefined, { weekday: "short" }))}</span>
   </article>`;
 }
 
@@ -1023,7 +1028,15 @@ function showSheet() {
       )
       .join("")}</div>
     <div class="d-tools">
-      ${t ? `<button class="mini" data-act="love" aria-pressed="${!!t.loved}">${IC.heart}Loved it</button><button class="mini" data-act="remove">${IC.bin}Remove</button>` : `<button class="mini" data-act="hide">${IC.hide}Not for me</button>`}
+      ${
+        t && t.status !== "want"
+          ? [["love", IC.heart + "Loved it"], ["ok", "It was okay"], ["no", "Didn't like it"]]
+              .map(([v, label]) => `<button class="mini" data-act="feel" data-v="${v}" aria-pressed="${t.feel === v}">${label}</button>`)
+              .join("")
+          : ""
+      }
+      <button class="mini" data-act="websearch">${IC.search}${searchSeason(id) ? `Search season ${searchSeason(id)}` : "Search"}</button>
+      ${t ? `<button class="mini" data-act="remove">${IC.bin}Remove</button>` : `<button class="mini" data-act="hide">${IC.hide}Not for me</button>`}
     </div>
     ${note}
     ${c?.sum ? `<p class="d-sum ${sheet.sumOpen ? "open" : ""}" data-act="sum">${esc(c.sum)}</p>` : ""}
@@ -1059,6 +1072,7 @@ function filtersSheet() {
 function settingsSheet() {
   return `<h2 class="s-title">Settings</h2>
     <label class="field"><span>Your name</span><input id="name" value="${esc(state.name)}" maxlength="24" autocomplete="off"></label>
+    <label class="field"><span>Words added to every search</span><input id="suffix" value="${esc(state.search ?? "watch")}" maxlength="60" autocomplete="off" autocapitalize="off" placeholder="e.g. watch"></label>
     <div class="f-group"><h3>Your shows</h3><div class="chips wrap">
       <button class="chip" data-act="refresh">Check for new episodes</button>
       <button class="chip" data-act="export">Save a backup</button>
@@ -1074,7 +1088,7 @@ function renderSheet(animate = false) {
   }
   memo = new Map();
   const keep = $sheet.querySelector(".sheet-body")?.scrollTop || 0;
-  const body = { show: showSheet, add: addSheet, filters: filtersSheet, settings: settingsSheet }[sheet.kind]();
+  const body = { show: showSheet, add: addSheet, filters: filtersSheet, settings: settingsSheet, link: linkSheet }[sheet.kind]();
   $sheet.innerHTML = `<div class="scrim" data-act="close"></div>
     <div class="sheet ${animate ? "" : "still"}" role="dialog" aria-modal="true">
       <div class="grab" data-act="close"></div>
@@ -1088,6 +1102,59 @@ function openShow(id, extra = {}) {
   const c = cache[id];
   if (!c || Date.now() - c.at > 36e5) loadShow(id, true);
   openSheet({ kind: "show", id, ...extra });
+}
+
+// The season worth searching for: the one you're on, else the one coming, else the latest.
+function searchSeason(id) {
+  const d = derive(id);
+  const e = d.nextUp || d.nextAir || d.eps[d.eps.length - 1];
+  return e ? e[1] : 0;
+}
+
+// A link ending in #add=… carries a list of shows to add: [id, status, feeling, [season, episode] watched through]
+function readAddLink() {
+  const m = location.hash.match(/^#add=([\w-]+)/);
+  if (!m) return;
+  history.replaceState(null, "", location.pathname + "#/home");
+  try {
+    const list = JSON.parse(atob(m[1].replace(/-/g, "+").replace(/_/g, "/")));
+    if (!Array.isArray(list) || !list.length || list.length > 400 || !list.every((x) => Array.isArray(x) && Number.isInteger(x[0]))) throw 0;
+    openSheet({ kind: "link", list });
+  } catch {
+    toast("That link didn't work");
+  }
+}
+function linkSheet() {
+  const n = sheet.list.filter((x) => !state.shows[x[0]]).length;
+  return `<h2 class="s-title">${n ? `Add ${plural(n, "show")} to Tonight?` : "Those shows are already here"}</h2>
+    <div class="sheet-foot">${n ? `<button class="act" data-act="add-link">Add them</button>` : `<button class="act plain" data-act="close">Close</button>`}</div>`;
+}
+async function importList(list) {
+  const todo = list.filter((x) => !state.shows[x[0]]);
+  let done = 0;
+  let missed = 0;
+  for (const [id, code, feel, upto] of todo) {
+    toast(`Adding your shows… ${done + 1} of ${todo.length}`);
+    await loadShow(id);
+    const info = known.get(id);
+    const c = cache[id];
+    done++;
+    if (!info || !c) {
+      missed++;
+      continue;
+    }
+    const status = { w: "watched", g: "watching", l: "want" }[code] || "want";
+    const ended = info.s === "E";
+    const through = upto ? (e) => e[1] < upto[0] || (e[1] === upto[0] && e[2] <= upto[1]) : () => status === "watched";
+    const t = { status, added: Date.now() - done * 1000, seen: c.eps.filter((e) => isAired(e, ended) && through(e)).map((e) => e[0]), info };
+    if (["love", "ok", "no"].includes(feel)) t.feel = feel;
+    state.shows[id] = t;
+    tasteV++;
+    save();
+    renderSoon();
+  }
+  navigator.storage?.persist?.();
+  toast(missed ? `Added ${done - missed} shows · ${missed} couldn't load` : `Added ${plural(done, "show")}`);
 }
 
 // ───────────────────────── toast ─────────────────────────
@@ -1129,7 +1196,7 @@ async function importBackup(file) {
     const data = JSON.parse(await file.text());
     if (!data || typeof data.shows !== "object") throw new Error("bad file");
     for (const t of Object.values(data.shows)) if (!t.info?.n || !LABEL[t.status] || !Array.isArray(t.seen)) throw new Error("bad file");
-    state = { v: 1, name: data.name || "Fay", shows: data.shows, hidden: data.hidden || [] };
+    state = { v: 1, name: data.name || "Fay", shows: data.shows, hidden: data.hidden || [], search: data.search };
     commit();
     refreshAll();
     closeSheet();
@@ -1172,10 +1239,23 @@ const ACTIONS = {
       else toast(`${name} added to ${LABEL[status]}`, "Undo", undoTo(id, snap));
     } else toast(`${name} is in ${LABEL[status]}`, "Undo", undoTo(id, snap));
   },
-  love() {
+  feel(el) {
     const t = state.shows[sheet.id];
-    t.loved = !t.loved;
+    if (t.feel === el.dataset.v) delete t.feel;
+    else t.feel = el.dataset.v;
     commit();
+  },
+  websearch() {
+    const id = sheet.id;
+    const info = state.shows[id]?.info || known.get(id);
+    const season = searchSeason(id);
+    const q = [info.n, season ? `season ${season}` : "", state.search ?? "watch"].filter(Boolean).join(" ");
+    window.open("https://www.google.com/search?q=" + encodeURIComponent(q), "_blank", "noopener");
+  },
+  "add-link"() {
+    const list = sheet.list;
+    closeSheet();
+    importList(list);
   },
   remove() {
     const id = sheet.id;
@@ -1271,6 +1351,10 @@ document.addEventListener("keydown", (ev) => {
 });
 document.addEventListener("input", (ev) => {
   if (ev.target.id === "q") onSearch(ev.target.value);
+  if (ev.target.id === "suffix") {
+    state.search = ev.target.value.trim();
+    save();
+  }
   if (ev.target.id === "name") {
     state.name = ev.target.value.trim();
     save();
@@ -1287,6 +1371,8 @@ for (const t of Object.values(state.shows)) known.set(t.info.i, t.info);
 render();
 loadData();
 refreshAll();
+readAddLink();
+addEventListener("hashchange", readAddLink);
 let lastCheck = Date.now();
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;

@@ -869,6 +869,14 @@ svg.ic {
 .mini[aria-pressed="true"] svg {
   fill: currentColor;
 }
+.mini[data-v="ok"][aria-pressed="true"] {
+  background: var(--butter);
+  color: var(--butter-ink);
+}
+.mini[data-v="no"][aria-pressed="true"] {
+  background: #e4e6ee;
+  color: var(--ink);
+}
 .d-note {
   margin-top: 16px;
   padding: 12px 16px;
