@@ -16,7 +16,9 @@ const read = (key) => {
     return null;
   }
 };
-let state = read(STATE_KEY) || { v: 1, name: "Fay", shows: {}, hidden: [] };
+const BASE = new URL(".", import.meta.url); // where the app's own files live
+// A page can name its owner (e.g. ann/ says data-name="Ann"); used only for a fresh start.
+let state = read(STATE_KEY) || { v: 1, name: document.documentElement.dataset.name || "Fay", shows: {}, hidden: [] };
 let cache = read(CACHE_KEY) || {}; // id → { at, sum, eps: [[id, season, number, name, airstamp]] }
 state.shows ||= {};
 state.hidden ||= [];
@@ -158,7 +160,7 @@ let catalog = [];
 let upcoming = [];
 let idf = {};
 async function loadData() {
-  const get = (f) => fetch(`data/${f}.json`).then((r) => r.json());
+  const get = (f) => fetch(new URL(`data/${f}.json`, BASE)).then((r) => r.json());
   try {
     const [c, u] = await Promise.all([get("catalog"), get("upcoming")]);
     catalog = c.shows;
@@ -1398,4 +1400,4 @@ document.addEventListener("visibilitychange", () => {
   }
   render(); // episodes may have aired while the app was in the background
 });
-if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) navigator.serviceWorker.register("sw.js").catch(() => {});
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) navigator.serviceWorker.register(new URL("sw.js", BASE)).catch(() => {});
