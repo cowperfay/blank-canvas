@@ -1,5 +1,5 @@
 // Keeps Tonight opening instantly (and offline), while always preferring the newest version.
-const CACHE = "tonight-v2";
+const CACHE = "tonight-v3";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "manifest.webmanifest", "fonts/figtree.woff2", "fonts/bricolage.woff2", "icons/icon-192.png"];
 
 self.addEventListener("install", (event) => {

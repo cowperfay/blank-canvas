@@ -1112,6 +1112,17 @@ function searchSeason(id) {
 }
 
 // A link ending in #add=… carries a list of shows to add: [id, status, feeling, [season, episode] watched through]
+// A link ending in #name=Ann sets who the app greets.
+function readNameLink() {
+  const m = location.hash.match(/^#name=([^&]{1,24})/);
+  if (!m) return;
+  history.replaceState(null, "", location.pathname + "#/home");
+  try {
+    state.name = decodeURIComponent(m[1]).trim() || state.name;
+  } catch {}
+  save();
+  render();
+}
 function readAddLink() {
   const m = location.hash.match(/^#add=([\w-]+)/);
   if (!m) return;
@@ -1371,8 +1382,12 @@ for (const t of Object.values(state.shows)) known.set(t.info.i, t.info);
 render();
 loadData();
 refreshAll();
+readNameLink();
 readAddLink();
-addEventListener("hashchange", readAddLink);
+addEventListener("hashchange", () => {
+  readNameLink();
+  readAddLink();
+});
 let lastCheck = Date.now();
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
